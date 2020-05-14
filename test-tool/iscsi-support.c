@@ -303,8 +303,9 @@ sg_send_scsi_cmd(struct scsi_device *sdev, struct scsi_task *task)
         case SCSI_XFER_READ:
                 io_hdr.dxfer_direction = SG_DXFER_FROM_DEV;
                 task->datain.size = task->expxferlen;
-                task->datain.data = malloc(task->datain.size);
-                memset(task->datain.data, 0, task->datain.size);
+                task->datain.data = NULL;
+                posix_memalign((void **)&task->datain.data, 4096,
+                               task->datain.size);
                 io_hdr.dxferp = task->datain.data;
                 io_hdr.dxfer_len = task->datain.size;
                 break;

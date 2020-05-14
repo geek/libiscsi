@@ -435,7 +435,9 @@ iscsi_process_scsi_reply(struct iscsi_context *iscsi, struct iscsi_pdu *pdu,
 		break;
 	case SCSI_STATUS_CHECK_CONDITION:
 		task->datain.size = in->data_pos;
-		task->datain.data = malloc(task->datain.size);
+                task->datain.data = NULL;
+		posix_memalign((void **)&task->datain.data, 4096,
+                               task->datain.size);
 		if (task->datain.data == NULL) {
 			iscsi_set_error(iscsi, "failed to allocate blob for "
 					"sense data");

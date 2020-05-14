@@ -258,22 +258,15 @@ static int check_result(const char *opcode, struct scsi_device *sdev,
 }
 
 #ifdef HAVE_SG_IO
-static size_t iov_tot_len(struct scsi_iovec *iov, int niov)
-{
-        size_t len = 0;
-        int i;
-
-        for (i = 0; i < niov; i++)
-                len += iov[i].iov_len;
-        return len;
-}
-
 static struct scsi_task *
 sg_send_scsi_cmd(struct scsi_device *sdev, struct scsi_task *task)
 {
         sg_io_hdr_t io_hdr;
         unsigned char sense[32];
         const unsigned int sense_len = sizeof(sense);
+        struct scsi_iovec *iov, local_iov = { };
+        int i, niov, aligned = 1;
+        size_t len;
         char *buf;
 
         memset(sense, 0, sizeof(sense));
@@ -288,6 +281,28 @@ sg_send_scsi_cmd(struct scsi_device *sdev, struct scsi_task *task)
         io_hdr.sbp = sense;
         io_hdr.mx_sb_len = sense_len;
 
+        len = 0;
+        niov = task->iovector_out.niov;
+        iov = task->iovector_out.iov;
+        for (i = 0; i < niov; i++) {
+                len += iov[i].iov_len;
+                if ((uintptr_t)iov[i].iov_base & 4095 || len & (block_size - 1))
+                        aligned = 0;
+        }
+        if (!aligned) {
+                size_t offset = 0;
+
+                posix_memalign(&local_iov.iov_base, 4096, len);
+                local_iov.iov_len = len;
+                for (i = 0; i < niov; i++) {
+                        memcpy((uint8_t *)local_iov.iov_base + offset,
+                               iov[i].iov_base,
+                               iov[i].iov_len);
+                        offset += iov[i].iov_len;
+                }
+                iov = &local_iov;
+                niov = 1;
+        }
         /*
          * Transfer direction, either in or out. Support for bidirectional SCSI
          * transfers has been removed from the Linux kernel.
@@ -295,10 +310,9 @@ sg_send_scsi_cmd(struct scsi_device *sdev, struct scsi_task *task)
         switch (task->xfer_dir) {
         case SCSI_XFER_WRITE:
                 io_hdr.dxfer_direction = SG_DXFER_TO_DEV;
-                io_hdr.iovec_count = task->iovector_out.niov;
-                io_hdr.dxferp = task->iovector_out.iov;
-                io_hdr.dxfer_len = iov_tot_len(task->iovector_out.iov,
-                                               task->iovector_out.niov);
+                io_hdr.iovec_count = niov;
+                io_hdr.dxferp = iov;
+                io_hdr.dxfer_len = len;
                 break;
         case SCSI_XFER_READ:
                 io_hdr.dxfer_direction = SG_DXFER_FROM_DEV;
